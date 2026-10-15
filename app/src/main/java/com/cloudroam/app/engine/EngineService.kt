@@ -4,11 +4,15 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.location.Location
+import android.location.LocationManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.cloudroam.app.MainActivity
@@ -17,20 +21,29 @@ import com.cloudroam.app.data.HookConfigWriter
 import com.cloudroam.app.data.Settings
 
 /**
- * 伪装引擎前台服务（FR-07）。
+ * 伪装引擎前台服务（FR-07），双引擎（FR-10）：
  *
- * 运行中：向注入层推送 enabled=true + 心跳续期；通知栏常驻（含"关闭伪装"动作）。
- * 生命周期兜底（共享规则：失败安全）：服务停止 / 被杀后心跳停止，
- * 注入层在有效期超时后自动放行真实数据，伪装绝不残留。
+ * FULL  — LSPosed 注入可用时：向 Hook 层推送配置 + 30s 心跳续期。
+ * COMPAT — 免 root：系统 Mock Provider 通道，1Hz 注入带噪声的 GPS 测试位置。
+ *
+ * 失败安全（共享规则）：服务停止/被杀 → FULL 停止心跳自动超时放行；
+ * COMPAT 移除测试 Provider，两种模式都不残留伪装。
  */
 class EngineService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
+    private var compatMode = false
+    private var currentPlace: Settings.Place? = null
 
-    private val heartbeat = object : Runnable {
+    private val tick = object : Runnable {
         override fun run() {
-            HookConfigWriter.refreshExpiry()
-            handler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+            if (compatMode) {
+                currentPlace?.let { injectCompat(it) }
+                handler.postDelayed(this, COMPAT_INTERVAL_MS)
+            } else {
+                HookConfigWriter.refreshExpiry()
+                handler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+            }
         }
     }
 
@@ -55,34 +68,104 @@ class EngineService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        currentPlace = place
 
-        // 配置通道不可用 → 按失败安全直接退出，绝不进入"看似开启实际未生效"的状态
-        val pushed = HookConfigWriter.push(
-            enabled = true,
-            lat = place.lat,
-            lng = place.lng,
-            name = place.name,
-        )
-        if (!pushed) {
-            EngineController.onError("无法连接 LSPosed 服务，请在自检中确认模块已激活")
-            stopSelf()
-            return START_NOT_STICKY
+        // 引擎选择：LSPosed 服务可用 → FULL；否则降级 COMPAT（FR-10）
+        val fullPushed =
+            if (HookConfigWriter.bound.value) {
+                HookConfigWriter.push(enabled = true, lat = place.lat, lng = place.lng, name = place.name)
+            } else false
+
+        if (fullPushed) {
+            compatMode = false
+            EngineController.onServiceRunning(EngineController.Mode.FULL)
+        } else {
+            if (!startCompat(place)) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            compatMode = true
+            EngineController.onServiceRunning(EngineController.Mode.COMPAT)
         }
 
-        startForegroundCompat(place)
-        handler.post(heartbeat)
-        EngineController.onServiceRunning()
+        startForegroundNotif(place)
+        handler.post(tick)
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(heartbeat)
-        HookConfigWriter.disable()
+        handler.removeCallbacks(tick)
+        if (compatMode) {
+            stopCompat()
+        } else {
+            HookConfigWriter.disable()
+        }
+        compatMode = false
+        currentPlace = null
         EngineController.onServiceStopped()
         super.onDestroy()
     }
 
-    private fun startForegroundCompat(place: Settings.Place) {
+    // ---------- COMPAT 引擎：系统 Mock Provider（FR-10） ----------
+
+    private fun startCompat(place: Settings.Place): Boolean = try {
+        val lm = getSystemService(LocationManager::class.java)
+        try {
+            lm.addTestProvider(
+                LocationManager.GPS_PROVIDER,
+                false, false, false, false,   // requiresNetwork/Satellite/Cell, monetaryCost
+                true, true, true,             // supportsAltitude/Speed/Bearing
+                PackageManager.PERMISSION_GRANTED,
+                PackageManager.PERMISSION_GRANTED
+            )
+        } catch (_: IllegalArgumentException) {
+            // 已注册过（上次异常退出残留），直接复用
+        }
+        lm.setTestProviderEnabled(LocationManager.GPS_PROVIDER, true)
+        injectCompat(place)
+        true
+    } catch (_: SecurityException) {
+        EngineController.onError(
+            "未获模拟位置权限：请到 系统设置 → 开发者选项 → 选择模拟位置信息应用，选择 CloudRoam 后重试"
+        )
+        false
+    }
+
+    private fun injectCompat(place: Settings.Place) {
+        val lm = getSystemService(LocationManager::class.java) ?: return
+        val loc = Location(LocationManager.GPS_PROVIDER).apply {
+            latitude = place.lat + compatJitter()
+            longitude = place.lng + compatJitter()
+            accuracy = 12f
+            altitude = 10.0
+            speed = 0f
+            bearing = 0f
+            time = System.currentTimeMillis()
+            elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+        }
+        try {
+            lm.setTestProviderLocation(LocationManager.GPS_PROVIDER, loc)
+        } catch (_: IllegalArgumentException) {
+            // Provider 已被系统清理，静默（下次 tick 重建由 startCompat 处理）
+        }
+    }
+
+    private fun stopCompat() {
+        try {
+            val lm = getSystemService(LocationManager::class.java)
+            lm.setTestProviderEnabled(LocationManager.GPS_PROVIDER, false)
+            lm.removeTestProvider(LocationManager.GPS_PROVIDER)
+        } catch (_: Exception) {
+            // 已被清理，忽略
+        }
+    }
+
+    /** 单点轻微噪声（±数米），避免"完美静止"被识别 */
+    private fun compatJitter(): Double = (Math.random() - 0.5) * 0.0001
+
+    // ---------- 通知（FR-07） ----------
+
+    private fun startForegroundNotif(place: Settings.Place) {
         val notif = buildNotification(place)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             ServiceCompat.startForeground(
@@ -94,6 +177,7 @@ class EngineService : Service() {
     }
 
     private fun buildNotification(place: Settings.Place): Notification {
+        val modeText = if (compatMode) "兼容模式" else "完整模式"
         val stopIntent = PendingIntent.getService(
             this, 0,
             Intent(this, EngineService::class.java).setAction(ACTION_STOP),
@@ -106,7 +190,7 @@ class EngineService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("CloudRoam 伪装运行中")
+            .setContentTitle("CloudRoam 伪装运行中（$modeText）")
             .setContentText("虚拟位置：${place.name}")
             .setOngoing(true)
             .setContentIntent(contentIntent)
@@ -119,5 +203,6 @@ class EngineService : Service() {
         const val ACTION_STOP = "com.cloudroam.app.action.STOP"
         const val NOTIF_ID = 1
         const val HEARTBEAT_INTERVAL_MS = 30_000L
+        const val COMPAT_INTERVAL_MS = 1_000L
     }
 }

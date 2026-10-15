@@ -56,6 +56,7 @@ fun HomeScreen() {
     val scope = rememberCoroutineScope()
 
     val engineStatus by EngineController.status.collectAsState()
+    val engineMode by EngineController.mode.collectAsState()
     var placeName by remember { mutableStateOf("") }
     var camLat by remember { mutableStateOf(31.2304) }
     var camLng by remember { mutableStateOf(121.4737) }
@@ -121,13 +122,14 @@ fun HomeScreen() {
                 Column(Modifier.padding(16.dp)) {
                     val running = engineStatus is EngineController.Status.Running
                     val error = engineStatus as? EngineController.Status.Error
+                    val modeText = if (engineMode == EngineController.Mode.FULL) "完整模式" else "兼容模式"
                     Surface(
                         shape = RoundedCornerShape(999.dp),
                         color = if (running) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surfaceVariant
                     ) {
                         Text(
-                            if (running) "伪装运行中 · 所有用到的APP只见虚拟位置"
+                            if (running) "伪装运行中 · $modeText · 所有APP只见虚拟位置"
                             else "真实位置 · 伪装未开启",
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium
@@ -156,6 +158,14 @@ fun HomeScreen() {
                         placeholder = { Text("自定义位置") }
                     )
                     Spacer(Modifier.height(10.dp))
+                    if (running && engineMode == EngineController.Mode.COMPAT) {
+                        Text(
+                            "兼容模式：不伪装 WiFi / 基站，测试时建议关闭手机 WiFi；若开启失败，请在 开发者选项 → 选择模拟位置信息应用 中选择 CloudRoam。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Button(
                             onClick = {

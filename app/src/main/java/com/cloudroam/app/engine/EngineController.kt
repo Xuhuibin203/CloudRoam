@@ -14,6 +14,9 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object EngineController {
 
+    /** FR-10：引擎双模式。FULL=LSPosed Hook；COMPAT=系统 Mock Provider（免 root） */
+    enum class Mode { FULL, COMPAT }
+
     sealed interface Status {
         data object Off : Status
         data object Running : Status
@@ -22,6 +25,9 @@ object EngineController {
 
     private val _status = MutableStateFlow<Status>(Status.Off)
     val status: StateFlow<Status> = _status.asStateFlow()
+
+    private val _mode = MutableStateFlow(Mode.COMPAT)
+    val mode: StateFlow<Mode> = _mode.asStateFlow()
 
     fun start(context: Context, place: Settings.Place) {
         val i = Intent(context.applicationContext, EngineService::class.java)
@@ -37,7 +43,8 @@ object EngineController {
         )
     }
 
-    fun onServiceRunning() {
+    fun onServiceRunning(mode: Mode) {
+        _mode.value = mode
         _status.value = Status.Running
     }
 

@@ -109,11 +109,18 @@ fun SelfCheckScreen(onPassed: () -> Unit) {
         }
 
         Spacer(Modifier.height(12.dp))
+        Text(
+            if (corePassed) "完整模式就绪：位置 / WiFi / 基站 / 卫星全量伪装。"
+            else "未检测到完整环境，将以【兼容模式】运行：位置伪装生效，但 WiFi / 基站不伪装（完整模式需 root + LSPosed）。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TextButton(onClick = { check() }) {
                 Text(if (checking) "检测中…" else "重新检测")
             }
-            Button(onClick = onPassed, enabled = corePassed && !checking) {
+            Button(onClick = onPassed, enabled = !checking) {
                 Text("进入首页")
             }
         }
