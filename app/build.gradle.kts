@@ -17,7 +17,8 @@ plugins {
 
 android {
     namespace = "com.cloudroam.app"
-    compileSdk = 35
+    compileSdk = 36
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "com.cloudroam.app"
@@ -26,6 +27,7 @@ android {
         versionCode = 1
         versionName = "0.1.0-M1"
         manifestPlaceholders["AMAP_KEY"] = amapKey
+        buildConfigField("String", "AMAP_KEY", "\"$amapKey\"")
     }
 
     buildTypes {
@@ -54,9 +56,9 @@ kotlin {
 
 dependencies {
     // LSPosed 模块 API：编译期可见，运行期由框架提供（compileOnly）
-    compileOnly("io.github.libxposed:api:102")
+    compileOnly("io.github.libxposed:api:101.0.0")
     // App 侧连接 LSPosed 服务（远程偏好设置 / 作用域申请）
-    implementation("io.github.libxposed:service:102")
+    implementation("io.github.libxposed:service:101.0.0")
 
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.compose.ui:ui")

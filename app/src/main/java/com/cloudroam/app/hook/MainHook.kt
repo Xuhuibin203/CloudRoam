@@ -14,7 +14,7 @@ class MainHook : XposedModule() {
     override fun onPackageLoaded(param: PackageLoadedParam) {
         // 每个进程只安装一次 hook
         if (!param.isFirstPackage) return
-        log(Log.INFO, TAG, "CloudRoam 已注入：${param.processName} (${param.packageName})")
+        log(Log.INFO, TAG, "CloudRoam 已注入：${param.getPackageName()}")
         try {
             LocationHooks.install(this)
         } catch (t: Throwable) {

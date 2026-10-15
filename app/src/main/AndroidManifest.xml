@@ -40,11 +40,7 @@
             </intent-filter>
         </service>
 
-        <!-- libxposed 服务通道：LSPosed 通过此 Provider 递送服务 binder，authority 约定为 ${applicationId}.xposed -->
-        <provider
-            android:name="io.github.libxposed.service.XposedProvider"
-            android:authorities="${applicationId}.xposed"
-            android:exported="true" />
+        <!-- libxposed 服务通道：service AAR 自带 XposedProvider 声明（authority=${applicationId}.XposedService），无需重复声明 -->
 
         <!-- 高德地图 Key：在 local.properties 配置 AMAP_KEY=xxx（FR-02） -->
         <meta-data

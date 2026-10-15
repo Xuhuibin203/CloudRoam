@@ -1,5 +1,6 @@
 package com.cloudroam.app.engine
 
+import android.content.Intent
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import com.cloudroam.app.MainActivity
@@ -19,7 +20,7 @@ class QuickTileService : TileService() {
     override fun onClick() {
         super.onClick()
         val status = EngineController.status.value
-        if (status is EngineController.Running) {
+        if (status is EngineController.Status.Running) {
             EngineController.stop(this)
         } else {
             // 未选点时引导回主页选点（FR-07：开启前置校验=已选点）
@@ -38,7 +39,7 @@ class QuickTileService : TileService() {
 
     private fun syncTile() {
         val tile = qsTile ?: return
-        val running = EngineController.status.value is EngineController.Running
+        val running = EngineController.status.value is EngineController.Status.Running
         tile.state = if (running) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.subtitle = if (running) {
             Settings.place.value?.name ?: "运行中"
