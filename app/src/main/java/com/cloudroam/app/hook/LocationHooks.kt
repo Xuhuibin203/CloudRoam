@@ -72,25 +72,37 @@ object LocationHooks {
             LocationListener::class.java, Looper::class.java
         )
 
-        // 3) getCurrentLocation（API 30+，Consumer 回调）
-        try {
-            val m = lm.getMethod(
-                "getCurrentLocation",
-                String::class.java,
-                android.os.CancellationSignal::class.java,
-                Consumer::class.java,
-                Executor::class.java
-            )
+        // 3) getCurrentLocation（API 30+）：不同版本的签名在 Consumer/Executor 参数顺序上有差异，
+        //    运行期探测 Consumer 参数位置，避免签名不匹配导致 hook 静默失效
+        listOf(
+            arrayOf(
+                String::class.java, android.os.CancellationSignal::class.java,
+                Consumer::class.java, Executor::class.java
+            ),
+            arrayOf(
+                String::class.java, android.os.CancellationSignal::class.java,
+                Executor::class.java, Consumer::class.java
+            ),
+        ).forEach { sig ->
+            val m = try {
+                lm.getMethod("getCurrentLocation", *sig)
+            } catch (_: NoSuchMethodException) {
+                return@forEach
+            }
             xposed.hook(m).intercept { chain ->
-                val consumer = chain.getArg(2) as Consumer<Location>
+                val args = chain.args
+                val consumerIdx = args.indexOfFirst { it is Consumer<*> }
+                if (consumerIdx < 0) return@intercept chain.proceed()
+                @Suppress("UNCHECKED_CAST")
+                val consumer = args[consumerIdx] as Consumer<Location>
                 val wrapped = Consumer<Location> { loc ->
                     spoof(loc)
                     consumer.accept(loc)
                 }
-                chain.proceed(arrayOf(chain.getArg(0), chain.getArg(1), wrapped, chain.getArg(3)))
+                val newArgs = args.toTypedArray()
+                newArgs[consumerIdx] = wrapped
+                chain.proceed(newArgs)
             }
-        } catch (_: NoSuchMethodException) {
-            // API < 30 无此方法
         }
 
         // 4) 模拟标记恒为"否"（FR-05：目标应用无法据此识别伪装）

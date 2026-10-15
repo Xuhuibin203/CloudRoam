@@ -36,12 +36,23 @@ class EngineService : Service() {
 
     private val tick = object : Runnable {
         override fun run() {
-            if (compatMode) {
-                currentPlace?.let { injectCompat(it) }
-                handler.postDelayed(this, COMPAT_INTERVAL_MS)
-            } else {
-                HookConfigWriter.refreshExpiry()
-                handler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+            try {
+                if (compatMode) {
+                    currentPlace?.let { injectCompat(it) }
+                    handler.postDelayed(this, COMPAT_INTERVAL_MS)
+                } else {
+                    if (!HookConfigWriter.refreshExpiry()) {
+                        // LSPosed 服务掉线：明示失效，90s 内 Hook 层心跳超时自动放行真实位置
+                        EngineController.onError("LSPosed 服务已断开，伪装即将失效，请重新开启")
+                        stopSelf()
+                        return
+                    }
+                    handler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+                }
+            } catch (e: Exception) {
+                // 运行期权限被撤销等异常：报错退出而非崩溃
+                EngineController.onError("引擎运行异常：${e.message ?: e.javaClass.simpleName}")
+                stopSelf()
             }
         }
     }
@@ -64,6 +75,8 @@ class EngineService : Service() {
                 } else null
             }
         if (place == null) {
+            // 先以前台状态进入再退出，避免 startForegroundService 无通知导致 RemoteServiceException
+            startForegroundSafe(null)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -169,7 +182,7 @@ class EngineService : Service() {
 
     // ---------- 通知（FR-07） ----------
 
-    private fun startForegroundSafe(place: Settings.Place) {
+    private fun startForegroundSafe(place: Settings.Place?) {
         val notif = buildNotification(place)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -187,7 +200,7 @@ class EngineService : Service() {
         }
     }
 
-    private fun buildNotification(place: Settings.Place): Notification {
+    private fun buildNotification(place: Settings.Place?): Notification {
         val modeText = if (compatMode) "兼容模式" else "完整模式"
         val stopIntent = PendingIntent.getService(
             this, 0,
@@ -202,7 +215,7 @@ class EngineService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
             .setContentTitle("CloudRoam 伪装运行中（$modeText）")
-            .setContentText("虚拟位置：${place.name}")
+            .setContentText("虚拟位置：${place?.name ?: "未指定"}")
             .setOngoing(true)
             .setContentIntent(contentIntent)
             .addAction(0, "关闭伪装", stopIntent)

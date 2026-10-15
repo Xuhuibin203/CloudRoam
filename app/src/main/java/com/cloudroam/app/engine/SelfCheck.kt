@@ -65,8 +65,13 @@ object SelfCheck {
         val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
         val out = p.inputStream.bufferedReader().readText()
         val err = p.errorStream.bufferedReader().readText()
-        p.waitFor()
-        (p.exitValue() == 0) to (out + err)
+        val done = p.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)
+        if (!done) {
+            p.destroyForcibly()
+            false to "su 执行超时"
+        } else {
+            (p.exitValue() == 0) to (out + err)
+        }
     } catch (t: Throwable) {
         false to (t.message ?: "无法执行 su")
     }
