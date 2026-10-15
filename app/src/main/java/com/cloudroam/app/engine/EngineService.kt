@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationManager
@@ -88,7 +87,7 @@ class EngineService : Service() {
             EngineController.onServiceRunning(EngineController.Mode.COMPAT)
         }
 
-        startForegroundNotif(place)
+        startForegroundSafe(place)
         handler.post(tick)
         return START_NOT_STICKY
     }
@@ -110,17 +109,19 @@ class EngineService : Service() {
 
     private fun startCompat(place: Settings.Place): Boolean = try {
         val lm = getSystemService(LocationManager::class.java)
+            ?: throw IllegalStateException("无法获取系统定位服务")
+        // 清理可能的残留注册，保证干净状态
         try {
-            lm.addTestProvider(
-                LocationManager.GPS_PROVIDER,
-                false, false, false, false,   // requiresNetwork/Satellite/Cell, monetaryCost
-                true, true, true,             // supportsAltitude/Speed/Bearing
-                PackageManager.PERMISSION_GRANTED,
-                PackageManager.PERMISSION_GRANTED
-            )
-        } catch (_: IllegalArgumentException) {
-            // 已注册过（上次异常退出残留），直接复用
+            lm.removeTestProvider(LocationManager.GPS_PROVIDER)
+        } catch (_: Exception) {
         }
+        lm.addTestProvider(
+            LocationManager.GPS_PROVIDER,
+            false, false, false, false,   // requiresNetwork/Satellite/Cell, monetaryCost
+            true, true, true,             // supportsAltitude/Speed/Bearing
+            1,   // powerUsage：POWER_USAGE_LOW（Android 11+ 校验：必须 1~3）
+            1    // accuracy：ACCURACY_FINE（Android 11+ 校验：必须 1~2）
+        )
         lm.setTestProviderEnabled(LocationManager.GPS_PROVIDER, true)
         injectCompat(place)
         true
@@ -128,6 +129,9 @@ class EngineService : Service() {
         EngineController.onError(
             "未获模拟位置权限：请到 系统设置 → 开发者选项 → 选择模拟位置信息应用，选择 CloudRoam 后重试"
         )
+        false
+    } catch (e: Exception) {
+        EngineController.onError("兼容模式启动失败：${e.message ?: e.javaClass.simpleName}")
         false
     }
 
@@ -165,14 +169,21 @@ class EngineService : Service() {
 
     // ---------- 通知（FR-07） ----------
 
-    private fun startForegroundNotif(place: Settings.Place) {
+    private fun startForegroundSafe(place: Settings.Place) {
         val notif = buildNotification(place)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            ServiceCompat.startForeground(
-                this, NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-            )
-        } else {
-            ServiceCompat.startForeground(this, NOTIF_ID, notif, 0)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ServiceCompat.startForeground(
+                    this, NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
+            } else {
+                ServiceCompat.startForeground(this, NOTIF_ID, notif, 0)
+            }
+        } catch (e: Exception) {
+            // Android 14+ 对 location 类型前台服务强制要求精确定位权限：未授予时降级报错而非崩溃
+            if (compatMode) stopCompat() else HookConfigWriter.disable()
+            EngineController.onError("请授予 CloudRoam 精确定位权限后重试（${e.message ?: "FGS"}）")
+            stopSelf()
         }
     }
 
