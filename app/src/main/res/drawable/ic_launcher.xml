@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 底板：品牌绿圆角方块 -->
+    <path
+        android:fillColor="#02743B"
+        android:pathData="M20,0 h68 a20,20 0 0 1 20,20 v68 a20,20 0 0 1 -20,20 h-68 a20,20 0 0 1 -20,-20 v-68 a20,20 0 0 1 20,-20 z" />
+    <!-- 定位大头针 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,26c-10.5,0 -19,8.5 -19,19c0,13.5 19,37 19,37s19,-23.5 19,-37C73,34.5 64.5,26 54,26zM54,52.5c-4.1,0 -7.5,-3.4 -7.5,-7.5s3.4,-7.5 7.5,-7.5s7.5,3.4 7.5,7.5S58.1,52.5 54,52.5z" />
+</vector>

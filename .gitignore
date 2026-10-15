@@ -1,0 +1,12 @@
+*.iml
+.idea/
+.gradle/
+build/
+app/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+.trae-html-share-packages/
